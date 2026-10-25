@@ -169,6 +169,7 @@ type delegate struct {
 
 	mdYAMLEnabled     func(org, repo string) bool
 	skipCollaborators func(org, repo string) bool
+	teamsEnabled      func() bool
 	ownersDirDenylist func() *prowConf.OwnersDirDenylist
 	filenames         ownersconfig.Resolver
 
@@ -219,6 +220,7 @@ func NewClient(
 	ghc github.Client,
 	mdYAMLEnabled func(org, repo string) bool,
 	skipCollaborators func(org, repo string) bool,
+	teamsEnabled func() bool,
 	ownersDirDenylist func() *prowConf.OwnersDirDenylist,
 	filenames ownersconfig.Resolver,
 ) *Client {
@@ -231,6 +233,7 @@ func NewClient(
 
 			mdYAMLEnabled:     mdYAMLEnabled,
 			skipCollaborators: skipCollaborators,
+			teamsEnabled:      teamsEnabled,
 			ownersDirDenylist: ownersDirDenylist,
 			filenames:         filenames,
 		},
@@ -319,7 +322,8 @@ func (c *Client) LoadRepoOwnersSha(org, repo, base, sha string, updateCache bool
 
 	// Team membership changes independently of repository content. Resolve on
 	// every load, using the GitHub client's ghproxy caching when configured.
-	resolved, err := entry.owners.resolveTeams(NewTeamResolver(org, c.ghc))
+	teamsEnabled := c.teamsEnabled != nil && c.teamsEnabled()
+	resolved, err := entry.owners.resolveTeams(NewTeamResolver(org, c.ghc, teamsEnabled))
 	if err != nil {
 		return nil, err
 	}

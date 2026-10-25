@@ -105,6 +105,28 @@ func TestValidateExternalPlugins(t *testing.T) {
 	}
 }
 
+func TestEnableGitHubTeams(t *testing.T) {
+	for _, tc := range []struct {
+		name, config string
+		want         bool
+	}{
+		{name: "default disabled", config: "{}"},
+		{name: "empty owners config", config: "owners: {}"},
+		{name: "explicitly disabled", config: "owners: {enable_github_teams: false}"},
+		{name: "enabled", config: "owners: {enable_github_teams: true}", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var config Configuration
+			if err := yaml.UnmarshalStrict([]byte(tc.config), &config); err != nil {
+				t.Fatal(err)
+			}
+			if got := config.Owners.EnableGitHubTeams; got != tc.want {
+				t.Errorf("EnableGitHubTeams = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestOwnersFilenames(t *testing.T) {
 	cases := []struct {
 		org      string

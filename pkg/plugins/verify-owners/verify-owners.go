@@ -157,7 +157,7 @@ func handlePullRequest(pc plugins.Agent, pre github.PullRequestEvent) error {
 		number:       pre.Number,
 	}
 
-	return handle(pc.GitHubClient, pc.GitClient, pc.OwnersClient, pc.Logger, &pre.PullRequest, prInfo, pc.PluginConfig.Owners.LabelsDenyList, pc.PluginConfig.TriggerFor(pre.Repo.Owner.Login, pre.Repo.Name), skipTrustedUserCheck, cp, pc.PluginConfig.OwnersFilenames)
+	return handle(pc.GitHubClient, pc.GitClient, pc.OwnersClient, pc.Logger, &pre.PullRequest, prInfo, pc.PluginConfig.Owners.LabelsDenyList, pc.PluginConfig.TriggerFor(pre.Repo.Owner.Login, pre.Repo.Name), skipTrustedUserCheck, pc.PluginConfig.Owners.EnableGitHubTeams, cp, pc.PluginConfig.OwnersFilenames)
 }
 
 func handleGenericCommentEvent(pc plugins.Agent, e github.GenericCommentEvent) error {
@@ -174,10 +174,10 @@ func handleGenericCommentEvent(pc plugins.Agent, e github.GenericCommentEvent) e
 		}
 	}
 
-	return handleGenericComment(pc.GitHubClient, pc.GitClient, pc.OwnersClient, pc.Logger, &e, pc.PluginConfig.Owners.LabelsDenyList, pc.PluginConfig.TriggerFor(e.Repo.Owner.Login, e.Repo.Name), skipTrustedUserCheck, cp, pc.PluginConfig.OwnersFilenames)
+	return handleGenericComment(pc.GitHubClient, pc.GitClient, pc.OwnersClient, pc.Logger, &e, pc.PluginConfig.Owners.LabelsDenyList, pc.PluginConfig.TriggerFor(e.Repo.Owner.Login, e.Repo.Name), skipTrustedUserCheck, pc.PluginConfig.Owners.EnableGitHubTeams, cp, pc.PluginConfig.OwnersFilenames)
 }
 
-func handleGenericComment(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *logrus.Entry, ce *github.GenericCommentEvent, bannedLabels []string, triggerConfig plugins.Trigger, skipTrustedUserCheck bool, cp commentPruner, resolver ownersconfig.Resolver) error {
+func handleGenericComment(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *logrus.Entry, ce *github.GenericCommentEvent, bannedLabels []string, triggerConfig plugins.Trigger, skipTrustedUserCheck, teamsEnabled bool, cp commentPruner, resolver ownersconfig.Resolver) error {
 	// Only consider open PRs and new comments.
 	if ce.IssueState != "open" || !ce.IsPR || ce.Action != github.GenericCommentActionCreated {
 		return nil
@@ -199,7 +199,7 @@ func handleGenericComment(ghc githubClient, gc git.ClientFactory, roc repoowners
 		return err
 	}
 
-	return handle(ghc, gc, roc, log, pr, prInfo, bannedLabels, triggerConfig, skipTrustedUserCheck, cp, resolver)
+	return handle(ghc, gc, roc, log, pr, prInfo, bannedLabels, triggerConfig, skipTrustedUserCheck, teamsEnabled, cp, resolver)
 }
 
 type messageWithLine struct {
@@ -207,7 +207,7 @@ type messageWithLine struct {
 	message string
 }
 
-func handle(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *logrus.Entry, pr *github.PullRequest, info info, bannedLabels []string, triggerConfig plugins.Trigger, skipTrustedUserCheck bool, cp commentPruner, resolver ownersconfig.Resolver) error {
+func handle(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *logrus.Entry, pr *github.PullRequest, info info, bannedLabels []string, triggerConfig plugins.Trigger, skipTrustedUserCheck, teamsEnabled bool, cp commentPruner, resolver ownersconfig.Resolver) error {
 	org := info.org
 	repo := info.repo
 	number := info.number
@@ -313,7 +313,7 @@ func handle(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *l
 
 	// Resolve teams even when trusted-user checks are disabled. A team is not a
 	// username, and inaccessible or cross-organization teams must not be ignored.
-	teams := repoowners.NewTeamResolver(org, ghc)
+	teams := repoowners.NewTeamResolver(org, ghc, teamsEnabled)
 	if _, err := teams.Resolve(repoAliases.ExpandAllAliases()); err != nil {
 		if !errors.Is(err, repoowners.ErrInvalidTeamReference) && !github.IsNotFound(err) {
 			return err

@@ -44,6 +44,21 @@ OWNERS_ALIASES file, or explicit GitHub team references.
 
 ### GitHub teams
 
+Team references are **disabled by default**. Enable them in Prow's central
+`plugins.yaml` configuration:
+
+```yaml
+owners:
+  enable_github_teams: true
+```
+
+This boolean applies to all repositories handled by the Prow instance; there is
+no per-repository setting. It belongs to the instance's plugin configuration, not
+a repository's `.prow.yaml`. When disabled, explicit team references are rejected with a
+configuration error, and Prow does not make team-membership requests. Ordinary
+users and static aliases continue to work without this setting. Configuration
+changes take effect on the next ownership load, even without a new commit.
+
 Use a quoted `"@org/team-slug"` reference in `approvers`, `reviewers`,
 `required_reviewers`, or `advisory_approvers`:
 

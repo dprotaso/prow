@@ -210,6 +210,9 @@ func main() {
 	skipCollaborators := func(org, repo string) bool {
 		return pluginAgent.Config().SkipCollaborators(org, repo)
 	}
+	teamsEnabled := func() bool {
+		return pluginAgent.Config().Owners.EnableGitHubTeams
+	}
 	ownersDirDenylist := func() *config.OwnersDirDenylist {
 		// OwnersDirDenylist struct contains some defaults that's required by all
 		// repos, so this function cannot return nil
@@ -222,7 +225,7 @@ func main() {
 	resolver := func(org, repo string) ownersconfig.Filenames {
 		return pluginAgent.Config().OwnersFilenames(org, repo)
 	}
-	ownersClient := repoowners.NewClient(gitClient, githubClient, mdYAMLEnabled, skipCollaborators, ownersDirDenylist, resolver)
+	ownersClient := repoowners.NewClient(gitClient, githubClient, mdYAMLEnabled, skipCollaborators, teamsEnabled, ownersDirDenylist, resolver)
 
 	clientAgent := &plugins.ClientAgent{
 		GitHubClient:              githubClient,

@@ -497,6 +497,10 @@ override:
         "": null
 # Owners contains configuration related to handling OWNERS files.
 owners:
+    # EnableGitHubTeams enables @org/team-slug references in OWNERS and
+    # OWNERS_ALIASES for all repositories. Disabled by default. Team membership
+    # is read from GitHub, independently of repository commits.
+    enable_github_teams: true
     # Filenames allows configuring repos to use a separate set of filenames for
     # any plugin that interacts with these files. Keys are in "org" or "org/repo" format.
     filenames:

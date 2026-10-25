@@ -43,7 +43,7 @@ func TestTeamResolver(t *testing.T) {
 	}
 	input := aliases.ExpandAliases(NormLogins([]string{"reviewers", "@org/maintainers", "@dave"}))
 	original := input.Clone()
-	resolver := NewTeamResolver("ORG", ghc)
+	resolver := NewTeamResolver("ORG", ghc, true)
 	for i := 0; i < 2; i++ {
 		got, err := resolver.Resolve(input)
 		if err != nil {
@@ -77,7 +77,7 @@ func TestTeamResolverErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ghc := &fakeGitHubClient{teamErr: tc.apiErr}
-			got, err := NewTeamResolver("org", ghc).Resolve(sets.New(tc.owner))
+			got, err := NewTeamResolver("org", ghc, true).Resolve(sets.New(tc.owner))
 			if err == nil || !strings.Contains(err.Error(), tc.want) || got != nil {
 				t.Fatalf("got %v, %v; want error containing %q", got, err, tc.want)
 			}
@@ -88,6 +88,50 @@ func TestTeamResolverErrors(t *testing.T) {
 				t.Errorf("got %d calls, want %d", ghc.teamCalls, tc.calls)
 			}
 		})
+	}
+}
+
+func TestTeamResolverDisabled(t *testing.T) {
+	ghc := &fakeGitHubClient{}
+	resolver := NewTeamResolver("org", ghc, false)
+	if _, err := resolver.Resolve(sets.New("@org/team")); !errors.Is(err, ErrInvalidTeamReference) || !strings.Contains(err.Error(), "owners.enable_github_teams") {
+		t.Fatalf("expected an opt-in error, got %v", err)
+	}
+	if got, err := resolver.Resolve(sets.New("alice", "team/local-alias")); err != nil || !got.Equal(sets.New("alice", "team/local-alias")) {
+		t.Fatalf("disabled teams changed ordinary owners: %v, %v", got, err)
+	}
+	if ghc.teamCalls != 0 {
+		t.Fatal("disabled teams must not perform membership lookups")
+	}
+}
+
+func TestTeamsOptInReload(t *testing.T) {
+	for _, reference := range []string{"@org/team", "maintainers"} {
+		files := map[string][]byte{
+			"OWNERS":         []byte("approvers: ['" + reference + "']\n"),
+			"OWNERS_ALIASES": []byte("aliases:\n  maintainers: ['@org/team']\n"),
+		}
+		client, cleanup, err := getTestClient(files, false, true, false, false, nil, nil, nil, nil, localgit.NewV2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(cleanup)
+		ghc := client.ghc.(*fakeGitHubClient)
+		ghc.teams = map[string][]github.TeamMember{"org/team": {{Login: "alice"}}}
+		// An absent callback, like absent configuration, leaves teams disabled.
+		if owners, err := client.LoadRepoOwners("org", "repo", defaultBranch); err == nil || owners != nil || ghc.teamCalls != 0 {
+			t.Fatalf("teams must default to disabled without API calls: %v, %v", owners, err)
+		}
+		enabled := true
+		client.teamsEnabled = func() bool { return enabled }
+		owners, err := client.LoadRepoOwners("org", "repo", defaultBranch)
+		if err != nil || !owners.AllApprovers().Equal(sets.New("alice")) || ghc.teamCalls != 1 {
+			t.Fatalf("opt-in did not take effect without a commit change: %v, %v", owners, err)
+		}
+		enabled = false
+		if owners, err := client.LoadRepoOwners("org", "repo", defaultBranch); err == nil || owners != nil || ghc.teamCalls != 1 {
+			t.Fatalf("disabled teams reused resolved ownership or called GitHub: %v, %v", owners, err)
+		}
 	}
 }
 
@@ -122,6 +166,7 @@ filters:
 				t.Fatal(err)
 			}
 			t.Cleanup(cleanup)
+			client.teamsEnabled = func() bool { return true }
 			ghc := client.ghc.(*fakeGitHubClient)
 			ghc.teams = map[string][]github.TeamMember{"org/team": {{Login: "alice"}, {Login: "outsider"}}}
 			first, err := client.LoadRepoOwners("org", "repo", defaultBranch)
@@ -179,6 +224,7 @@ func TestTeamAdvisoryApprovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(cleanup)
+	client.teamsEnabled = func() bool { return true }
 	client.ghc.(*fakeGitHubClient).teams = map[string][]github.TeamMember{"org/team": {{Login: "bob"}}}
 	owners, err := client.LoadRepoOwners("org", "repo", defaultBranch)
 	if err != nil {
@@ -206,6 +252,7 @@ func TestTeamsInRequiredReviewers(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(cleanup)
+		client.teamsEnabled = func() bool { return true }
 		ghc := client.ghc.(*fakeGitHubClient)
 		ghc.teams = map[string][]github.TeamMember{"org/team": {{Login: "alice"}, {Login: "bob"}, {Login: "carol"}}}
 		owners, err := client.LoadRepoOwners("org", "repo", defaultBranch)

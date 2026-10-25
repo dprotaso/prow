@@ -566,7 +566,7 @@ func testHandle(clients localgit.Clients, t *testing.T) {
 				number:       pr,
 			}
 
-			if err := handle(fghc, c, makeFakeRepoOwnersClient(), logrus.WithField("plugin", PluginName), &pre.PullRequest, prInfo, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, false, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
+			if err := handle(fghc, c, makeFakeRepoOwnersClient(), logrus.WithField("plugin", PluginName), &pre.PullRequest, prInfo, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, false, false, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
 				t.Fatalf("Handle PR: %v", err)
 			}
 			if !test.shouldLabel && IssueLabelsContain(fghc.IssueLabelsAdded, labels.InvalidOwners) {
@@ -1233,7 +1233,7 @@ func testNonCollaborators(clients localgit.Clients, t *testing.T) {
 				number:       pr,
 			}
 
-			if err := handle(fghc, c, froc, logrus.WithField("plugin", PluginName), &pre.PullRequest, prInfo, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, test.skipTrustedUserCheck, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
+			if err := handle(fghc, c, froc, logrus.WithField("plugin", PluginName), &pre.PullRequest, prInfo, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, test.skipTrustedUserCheck, false, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
 				t.Fatalf("Handle PR: %v", err)
 			}
 			if !test.shouldLabel && IssueLabelsContain(fghc.IssueLabelsAdded, labels.InvalidOwners) {
@@ -1404,7 +1404,7 @@ func testHandleGenericComment(clients localgit.Clients, t *testing.T) {
 				},
 			}
 
-			if err := handleGenericComment(fghc, c, makeFakeRepoOwnersClient(), logrus.WithField("plugin", PluginName), &test.commentEvent, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, false, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
+			if err := handleGenericComment(fghc, c, makeFakeRepoOwnersClient(), logrus.WithField("plugin", PluginName), &test.commentEvent, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, false, false, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
 				t.Fatalf("Handle PR: %v", err)
 			}
 			if !test.shouldLabel && IssueLabelsContain(fghc.IssueLabelsAdded, labels.InvalidOwners) {
@@ -1537,7 +1537,7 @@ func testOwnersRemoval(clients localgit.Clients, t *testing.T) {
 
 			froc := makeFakeRepoOwnersClient()
 
-			if err := handle(fghc, c, froc, logrus.WithField("plugin", PluginName), &pre.PullRequest, prInfo, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, false, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
+			if err := handle(fghc, c, froc, logrus.WithField("plugin", PluginName), &pre.PullRequest, prInfo, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, false, false, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
 				t.Fatalf("Handle PR: %v", err)
 			}
 			if test.shouldRemoveLabel && !IssueLabelsContain(fghc.IssueLabelsRemoved, labels.InvalidOwners) {
@@ -1640,7 +1640,7 @@ func testHandleParseAliasesConfigWarningLabels(clients localgit.Clients, t *test
 				number:       pr,
 			}
 
-			if err := handle(fghc, c, froc, logrus.WithField("plugin", PluginName), &pre.PullRequest, prInfo, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, true, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
+			if err := handle(fghc, c, froc, logrus.WithField("plugin", PluginName), &pre.PullRequest, prInfo, []string{labels.Approved, labels.LGTM}, plugins.Trigger{}, true, false, &fakePruner{}, ownersconfig.FakeResolver); err != nil {
 				t.Fatalf("Found errors when no error was expected")
 			} else {
 				// Check if the PR created had empty alias comment comment.

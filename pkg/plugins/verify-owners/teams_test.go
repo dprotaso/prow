@@ -46,16 +46,21 @@ func (c *teamGitHubClient) ListTeamMembersBySlug(org, slug, role string) ([]gith
 
 func TestHandleTeams(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		owners      string
-		aliases     string
-		aliasOnly   bool
-		skipTrusted bool
-		lookupErr   error
-		wantInvalid bool
-		wantError   bool
-		wantCalls   int
+		name         string
+		owners       string
+		aliases      string
+		aliasOnly    bool
+		skipTrusted  bool
+		disableTeams bool
+		lookupErr    error
+		wantInvalid  bool
+		wantError    bool
+		wantCalls    int
 	}{
+		{name: "disabled direct team", owners: "approvers: ['@org/leads']", disableTeams: true, wantInvalid: true},
+		{name: "disabled team alias", owners: "approvers: [maintainers]", aliases: "aliases:\n  maintainers: ['@org/leads']", disableTeams: true, wantInvalid: true},
+		{name: "disabled team without trusted checks", owners: "approvers: ['@org/leads']", disableTeams: true, skipTrusted: true, wantInvalid: true},
+		{name: "disabled required team", owners: "approvers: [alice]\nrequired_reviewers: ['@org/leads']", disableTeams: true, wantInvalid: true},
 		{name: "direct team", owners: "approvers: ['@org/leads']\nreviewers: ['@org/leads']", wantCalls: 1},
 		{name: "team alias", owners: "approvers: [maintainers]", aliases: "aliases:\n  maintainers: ['@org/leads']", wantCalls: 1},
 		{name: "team alias without trusted checks", owners: "approvers: [maintainers]", aliases: "aliases:\n  maintainers: ['@org/leads']", skipTrusted: true, wantCalls: 1},
@@ -122,7 +127,7 @@ func TestHandleTeams(t *testing.T) {
 			}
 			err = handle(ghc, gc, makeFakeRepoOwnersClient(), logrus.NewEntry(logrus.New()), pr,
 				info{org: "org", repo: "repo", repoFullName: "org/repo", number: 1}, nil,
-				plugins.Trigger{}, tc.skipTrusted, &fakePruner{}, ownersconfig.FakeResolver)
+				plugins.Trigger{}, tc.skipTrusted, !tc.disableTeams, &fakePruner{}, ownersconfig.FakeResolver)
 			if (err != nil) != tc.wantError {
 				t.Fatalf("error = %v, want error: %t", err, tc.wantError)
 			}

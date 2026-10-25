@@ -44,13 +44,15 @@ var teamReferenceRE = regexp.MustCompile(`^@([a-z0-9][a-z0-9-]*)/([a-z0-9][a-z0-
 // A resolver is not safe for concurrent use.
 type TeamResolver struct {
 	org     string
+	enabled bool
 	client  TeamMembershipClient
 	members map[string]sets.Set[string]
 }
 
 // NewTeamResolver constructs a resolver for teams in the repository's organization.
-func NewTeamResolver(org string, client TeamMembershipClient) *TeamResolver {
-	return &TeamResolver{org: strings.ToLower(org), client: client, members: map[string]sets.Set[string]{}}
+// Disabled resolvers reject team references without querying GitHub.
+func NewTeamResolver(org string, client TeamMembershipClient, enabled bool) *TeamResolver {
+	return &TeamResolver{org: strings.ToLower(org), enabled: enabled, client: client, members: map[string]sets.Set[string]{}}
 }
 
 // Resolve expands team references, returning a new set without modifying owners.
@@ -62,6 +64,9 @@ func (r *TeamResolver) Resolve(owners sets.Set[string]) (sets.Set[string], error
 		if !strings.HasPrefix(owner, "@") || !strings.Contains(owner, "/") {
 			result.Insert(owner)
 			continue
+		}
+		if !r.enabled {
+			return nil, fmt.Errorf("%w %q: GitHub teams are disabled; set owners.enable_github_teams to true in plugins.yaml", ErrInvalidTeamReference, owner)
 		}
 		ref := strings.ToLower(owner)
 		match := teamReferenceRE.FindStringSubmatch(ref)

@@ -272,6 +272,11 @@ type Owners struct {
 	*/
 	MDYAMLRepos []string `json:"mdyamlrepos,omitempty"`
 
+	// EnableGitHubTeams enables @org/team-slug references in OWNERS and
+	// OWNERS_ALIASES for all repositories. Disabled by default. Team membership
+	// is read from GitHub, independently of repository commits.
+	EnableGitHubTeams bool `json:"enable_github_teams,omitempty"`
+
 	// SkipCollaborators disables collaborator cross-checks and forces both
 	// the approve and lgtm plugins to use solely OWNERS files for access
 	// control in the provided repos.
