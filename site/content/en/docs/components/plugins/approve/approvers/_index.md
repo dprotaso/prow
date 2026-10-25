@@ -39,7 +39,74 @@ approvers:
 - lina
 ```
 
-Note that items in the OWNERS files can be GitHub usernames, or aliases defined in OWNERS_ALIASES files. An OWNERS_ALIASES file is another co-existed file that delivers a mechanism for defining groups. However, GitHub Team names are not supported. We do not use them because there is no audit log for changes to the GitHub Teams. This way we have an audit log.
+Items in OWNERS files can be GitHub usernames, aliases defined in the repository's
+OWNERS_ALIASES file, or explicit GitHub team references.
+
+### GitHub teams
+
+Use a quoted `"@org/team-slug"` reference in `approvers`, `reviewers`, or
+`advisory_approvers`:
+
+```yaml
+approvers:
+- alice
+- "@example/maintainers"
+reviewers:
+- project-reviewers
+```
+
+Team references can also be members of aliases in OWNERS_ALIASES:
+
+```yaml
+aliases:
+  project-reviewers:
+  - bob
+  - "@example/reviewers"
+```
+
+The organization must match the repository's organization. Use the team's URL
+slug, not its display name. Quotes are required because YAML does not permit an
+unquoted value beginning with `@`. Existing username and alias syntax is unchanged;
+for example, an alias named `team/reviewers` without the leading `@` is still a
+local alias, not a GitHub team.
+
+Prow expands teams into individual usernames and deduplicates them with other
+owners. Existing directory inheritance, filtered ownership, collaborator filtering,
+and reviewer-selection rules still apply. Reviewers are requested individually;
+this does not create a native GitHub team review request. Team members listed as
+advisory approvers retain advisory semantics and are not automatically assigned
+as approvers.
+
+Teams are not supported in `required_reviewers`, including through aliases:
+that field requires specific individuals and does not mean "one member of a team".
+The `verify-owners` plugin validates team references even when trusted-user checks
+are disabled. Invalid syntax, cross-organization references, and teams GitHub
+reports as not found are rejected. Other lookup failures are returned as errors,
+not interpreted as empty membership or invalid configuration; retry validation
+once access or service availability is restored.
+
+#### Membership access and caching
+
+The Prow bot must be able to read the referenced teams' membership. A GitHub App
+typically needs organization **Members: read** permission; token-based authentication
+needs appropriate organization access, such as `read:org`. Private-team visibility
+and organization policies can further restrict access. A not-found response may
+mean the bot cannot see the team, rather than that the team does not exist.
+
+Membership is resolved on every ownership load, independently of the commit SHA.
+Repeated references to the same team within a load share one membership snapshot.
+When configured, the existing GitHub client routes membership requests through
+[ghproxy](/docs/ghproxy/ghcache/), which caches responses and conditionally
+revalidates them with GitHub. No additional membership TTL cache is used. Without
+ghproxy, ownership loads make ordinary GitHub API requests. Membership lookup
+failures cause the ownership load to fail rather than returning stale ownership.
+
+Changes to a team take effect on the next ownership load, subject to GitHub's
+consistency behavior. This does not proactively revoke existing `approved` labels
+or trigger reevaluation of open PRs when membership changes. Team membership
+changes are **not recorded in the repository's Git history**: use explicit users
+or static aliases when a Git-auditable ownership roster is required. By referencing
+a team, repository maintainers delegate roster management to that team's managers.
 
 ## Reviewer Selection Plugins
 

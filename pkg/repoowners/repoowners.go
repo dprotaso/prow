@@ -78,6 +78,7 @@ type FullConfig struct {
 }
 
 type githubClient interface {
+	TeamMembershipClient
 	ListCollaborators(org, repo string) ([]github.User, error)
 	GetRef(org, repo, ref string) (string, error)
 }
@@ -316,11 +317,18 @@ func (c *Client) LoadRepoOwnersSha(org, repo, base, sha string, updateCache bool
 		return nil, err
 	}
 
+	// Team membership changes independently of repository content. Resolve on
+	// every load, using the GitHub client's ghproxy caching when configured.
+	resolved, err := entry.owners.resolveTeams(NewTeamResolver(org, c.ghc))
+	if err != nil {
+		return nil, err
+	}
+
 	start := time.Now()
 	if c.skipCollaborators(org, repo) {
 		log.WithField("duration", time.Since(start).String()).Debugf("Completed c.skipCollaborators(%s, %s)", org, repo)
 		log.Debugf("Skipping collaborator checks for %s/%s", org, repo)
-		return entry.owners, nil
+		return resolved, nil
 	}
 	log.WithField("duration", time.Since(start).String()).Debugf("Completed c.skipCollaborators(%s, %s)", org, repo)
 
@@ -332,10 +340,10 @@ func (c *Client) LoadRepoOwnersSha(org, repo, base, sha string, updateCache bool
 	log.WithField("duration", time.Since(start).String()).Debugf("Completed ghc.ListCollaborators(%s, %s)", org, repo)
 	if err != nil {
 		log.WithError(err).Errorf("Failed to list collaborators while loading RepoOwners. Skipping collaborator filtering.")
-		owners = entry.owners
+		owners = resolved
 	} else {
 		start = time.Now()
-		owners = entry.owners.filterCollaborators(collaborators)
+		owners = resolved.filterCollaborators(collaborators)
 		log.WithField("duration", time.Since(start).String()).Debugf("Completed owners.filterCollaborators(collaborators)")
 	}
 	return owners, nil
@@ -441,6 +449,10 @@ func (a RepoAliases) ExpandAliases(logins sets.Set[string]) sets.Set[string] {
 	// Make logins a copy of the original set to avoid modifying the original.
 	logins = logins.Union(nil)
 	for _, login := range sets.List(logins) {
+		// Team references cannot be shadowed by local aliases.
+		if strings.HasPrefix(login, "@") && strings.Contains(login, "/") {
+			continue
+		}
 		if expanded, ok := a[github.NormLogin(login)]; ok {
 			logins.Delete(login)
 			logins = logins.Union(expanded)
@@ -673,6 +685,9 @@ func ParseAliasesConfig(b []byte) (RepoAliases, error) {
 	}
 
 	for alias, expanded := range config.Data {
+		if strings.HasPrefix(alias, "@") && strings.Contains(alias, "/") {
+			return result, fmt.Errorf("alias name %q is reserved for team references", alias)
+		}
 		switch v := expanded.(type) {
 		case []any:
 			// Convert []interface{} to []string
@@ -726,7 +741,13 @@ func decodeOwnersMdConfig(path string, config *SimpleConfig) error {
 func NormLogins(logins []string) sets.Set[string] {
 	normed := sets.New[string]()
 	for _, login := range logins {
-		normed.Insert(github.NormLogin(login))
+		// Preserve the explicit team marker; GitHub's username normalization
+		// strips it. References are validated when resolving membership.
+		if strings.HasPrefix(login, "@") && strings.Contains(login, "/") {
+			normed.Insert(strings.ToLower(login))
+		} else {
+			normed.Insert(github.NormLogin(login))
+		}
 	}
 	return normed
 }

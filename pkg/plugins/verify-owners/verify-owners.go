@@ -17,6 +17,7 @@ limitations under the License.
 package verifyowners
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -107,6 +108,7 @@ type repoownersClient interface {
 }
 
 type githubClient interface {
+	repoowners.TeamMembershipClient
 	IsCollaborator(owner, repo, login string) (bool, error)
 	IsMember(org, user string) (bool, error)
 	AddLabel(org, repo string, number int, label string) error
@@ -309,11 +311,47 @@ func handle(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *l
 		return fmt.Errorf("error loading RepoOwners: %w", err)
 	}
 
+	// An alias-only change can introduce a team into an unchanged OWNERS
+	// file's required_reviewers. Check those references as well.
+	if ownerAliasesModified {
+		if err := validateRequiredReviewerTeams(oc, r.Directory(), repoAliases, filenames); err != nil {
+			if !hasInvalidOwnersLabel {
+				if err := ghc.AddLabel(org, repo, number, labels.InvalidOwners); err != nil {
+					return err
+				}
+			}
+			return ghc.CreateComment(org, repo, number, err.Error())
+		}
+	}
+
+	// Resolve teams even when trusted-user checks are disabled. A team is not a
+	// username, and inaccessible or cross-organization teams must not be ignored.
+	teams := repoowners.NewTeamResolver(org, ghc)
+	if _, err := teams.Resolve(repoAliases.ExpandAllAliases()); err != nil {
+		if !errors.Is(err, repoowners.ErrInvalidTeamReference) && !github.IsNotFound(err) {
+			return err
+		}
+		if !hasInvalidOwnersLabel {
+			if err := ghc.AddLabel(org, repo, number, labels.InvalidOwners); err != nil {
+				return err
+			}
+		}
+		return ghc.CreateComment(org, repo, number, fmt.Sprintf("Cannot resolve teams in %s: %v", filenames.OwnersAliases, err))
+	}
+
 	for _, c := range modifiedOwnersFiles {
 		path := filepath.Join(r.Directory(), c.Filename)
-		msg, owners := parseOwnersFile(oc, path, c, log, bannedLabels, filenames)
+		msg, owners := parseOwnersFile(oc, path, c, log, bannedLabels, filenames, repoAliases)
 		if msg != nil {
 			wrongOwnersFiles[c.Filename] = *msg
+			continue
+		}
+
+		if _, err := teams.Resolve(repoAliases.ExpandAliases(repoowners.NormLogins(owners))); err != nil {
+			if !errors.Is(err, repoowners.ErrInvalidTeamReference) && !github.IsNotFound(err) {
+				return err
+			}
+			wrongOwnersFiles[c.Filename] = messageWithLine{1, err.Error()}
 			continue
 		}
 
@@ -397,7 +435,48 @@ func handle(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *l
 	return nil
 }
 
-func parseOwnersFile(oc ownersClient, path string, c github.PullRequestChange, log *logrus.Entry, bannedLabels []string, filenames ownersconfig.Filenames) (*messageWithLine, []string) {
+// validateRequiredReviewerTeams also checks unchanged OWNERS files after an
+// alias edit. Parsing errors in changed files are reported by parseOwnersFile.
+func validateRequiredReviewerTeams(oc ownersClient, dir string, aliases repoowners.RepoAliases, filenames ownersconfig.Filenames) error {
+	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() && info.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if !info.Mode().IsRegular() || info.Name() != filenames.Owners {
+			return nil
+		}
+		validate := func(config repoowners.Config) error {
+			if err := repoowners.ValidateRequiredReviewers(aliases.ExpandAliases(repoowners.NormLogins(config.RequiredReviewers))); err != nil {
+				rel, _ := filepath.Rel(dir, path)
+				return fmt.Errorf("%s: %w", rel, err)
+			}
+			return nil
+		}
+		simple, err := oc.ParseSimpleConfig(path)
+		if err == filepath.SkipDir {
+			return nil
+		}
+		if err == nil && !simple.Empty() {
+			return validate(simple.Config)
+		}
+		full, err := oc.ParseFullConfig(path)
+		if err != nil {
+			return nil
+		}
+		for _, config := range full.Filters {
+			if err := validate(config); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func parseOwnersFile(oc ownersClient, path string, c github.PullRequestChange, log *logrus.Entry, bannedLabels []string, filenames ownersconfig.Filenames, aliases repoowners.RepoAliases) (*messageWithLine, []string) {
+	var requiredReviewers []string
 	var reviewers []string
 	var approvers []string
 	var advisoryApprovers []string
@@ -436,6 +515,7 @@ func parseOwnersFile(oc ownersClient, path string, c github.PullRequestChange, l
 		}
 		// it's a FullConfig
 		for _, config := range full.Filters {
+			requiredReviewers = append(requiredReviewers, config.RequiredReviewers...)
 			reviewers = append(reviewers, config.Reviewers...)
 			approvers = append(approvers, config.Approvers...)
 			advisoryApprovers = append(advisoryApprovers, config.AdvisoryApprovers...)
@@ -443,10 +523,14 @@ func parseOwnersFile(oc ownersClient, path string, c github.PullRequestChange, l
 		}
 	} else {
 		// it's a SimpleConfig
+		requiredReviewers = simple.Config.RequiredReviewers
 		reviewers = simple.Config.Reviewers
 		approvers = simple.Config.Approvers
 		advisoryApprovers = simple.Config.AdvisoryApprovers
 		labels = simple.Config.Labels
+	}
+	if err := repoowners.ValidateRequiredReviewers(aliases.ExpandAliases(repoowners.NormLogins(requiredReviewers))); err != nil {
+		return &messageWithLine{lineNumber, err.Error()}, nil
 	}
 	// Check labels against ban list
 	if sets.New[string](labels...).HasAny(bannedLabels...) {
@@ -535,6 +619,12 @@ func nonTrustedUsersInOwners(ghc githubClient, log *logrus.Entry, triggerConfig 
 // and then checks if the owner is a trusted user.
 // returns a map from user to reasons for not being trusted
 func checkIfTrustedUser(ghc githubClient, log *logrus.Entry, triggerConfig plugins.Trigger, owner, patch, fileName, org, repo string, nonTrustedUsers map[string]nonTrustedReasons, trustedUsers sets.Set[string], repoAliases repoowners.RepoAliases) (map[string]nonTrustedReasons, error) {
+	// Team references are validated separately through the membership API, not
+	// passed to username-based trust checks. Their members are filtered by the
+	// normal collaborator policy when ownership is loaded.
+	if strings.HasPrefix(owner, "@") && strings.Contains(owner, "/") {
+		return nonTrustedUsers, nil
+	}
 	// cap the number of checks to avoid exhausting tokens in case of large OWNERS refactors.
 	if len(nonTrustedUsers)+trustedUsers.Len() > 50 {
 		return nonTrustedUsers, nil

@@ -128,6 +128,9 @@ type cacheOptions struct {
 type fakeGitHubClient struct {
 	Collaborators []string
 	ref           string
+	teams         map[string][]github.TeamMember
+	teamCalls     int
+	teamErr       error
 }
 
 func (f *fakeGitHubClient) ListCollaborators(org, repo string) ([]github.User, error) {
@@ -136,6 +139,11 @@ func (f *fakeGitHubClient) ListCollaborators(org, repo string) ([]github.User, e
 		result = append(result, github.User{Login: login})
 	}
 	return result, nil
+}
+
+func (f *fakeGitHubClient) ListTeamMembersBySlug(org, slug, role string) ([]github.TeamMember, error) {
+	f.teamCalls++
+	return f.teams[org+"/"+slug], f.teamErr
 }
 
 func (f *fakeGitHubClient) GetRef(org, repo, ref string) (string, error) {
