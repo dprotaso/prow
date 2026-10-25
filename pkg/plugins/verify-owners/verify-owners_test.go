@@ -692,7 +692,7 @@ func testParseOwnersFile(clients localgit.Clients, t *testing.T) {
 			}()
 
 			path := filepath.Join(r.Directory(), "OWNERS")
-			message, _ := parseOwnersFile(&fakeOwnersClient{}, path, change, &logrus.Entry{}, []string{}, ownersconfig.FakeFilenames, nil)
+			message, _ := parseOwnersFile(&fakeOwnersClient{}, path, change, &logrus.Entry{}, []string{}, ownersconfig.FakeFilenames)
 			if message != nil {
 				if test.errLine == 0 {
 					t.Errorf("%s: expected no error, got one: %s", test.name, message.message)
@@ -775,7 +775,7 @@ func testParseOwnersFileIncludesAdvisoryApprovers(clients localgit.Clients, t *t
 			}()
 
 			path := filepath.Join(r.Directory(), "OWNERS")
-			message, owners := parseOwnersFile(&fakeOwnersClient{}, path, change, &logrus.Entry{}, []string{}, ownersconfig.FakeFilenames, nil)
+			message, owners := parseOwnersFile(&fakeOwnersClient{}, path, change, &logrus.Entry{}, []string{}, ownersconfig.FakeFilenames)
 			if message != nil {
 				t.Fatalf("unexpected error: %s", message.message)
 			}

@@ -88,27 +88,9 @@ func (r *TeamResolver) Resolve(owners sets.Set[string]) (sets.Set[string], error
 	return result, nil
 }
 
-// ValidateRequiredReviewers rejects teams, including teams expanded from aliases.
-// A required reviewer is an individual, not an "at least one member" group.
-func ValidateRequiredReviewers(owners sets.Set[string]) error {
-	for _, owner := range sets.List(owners) {
-		if strings.HasPrefix(owner, "@") && strings.Contains(owner, "/") {
-			return fmt.Errorf("team reference %q is not supported in required_reviewers", owner)
-		}
-	}
-	return nil
-}
-
 // resolveTeams returns a new ownership snapshot, leaving the SHA-keyed cache
 // untouched. Alias expansion has already happened while parsing ownership maps.
 func (o *RepoOwners) resolveTeams(resolver *TeamResolver) (*RepoOwners, error) {
-	for _, entries := range o.requiredReviewers {
-		for _, owners := range entries {
-			if err := ValidateRequiredReviewers(owners); err != nil {
-				return nil, err
-			}
-		}
-	}
 	resolve := func(source map[string]map[*regexp.Regexp]sets.Set[string]) (map[string]map[*regexp.Regexp]sets.Set[string], error) {
 		if source == nil {
 			return nil, nil
@@ -132,6 +114,9 @@ func (o *RepoOwners) resolveTeams(resolver *TeamResolver) (*RepoOwners, error) {
 		return nil, err
 	}
 	if result.reviewers, err = resolve(o.reviewers); err != nil {
+		return nil, err
+	}
+	if result.requiredReviewers, err = resolve(o.requiredReviewers); err != nil {
 		return nil, err
 	}
 	if result.advisoryApprovers, err = resolve(o.advisoryApprovers); err != nil {

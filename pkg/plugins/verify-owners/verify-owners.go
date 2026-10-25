@@ -311,19 +311,6 @@ func handle(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *l
 		return fmt.Errorf("error loading RepoOwners: %w", err)
 	}
 
-	// An alias-only change can introduce a team into an unchanged OWNERS
-	// file's required_reviewers. Check those references as well.
-	if ownerAliasesModified {
-		if err := validateRequiredReviewerTeams(oc, r.Directory(), repoAliases, filenames); err != nil {
-			if !hasInvalidOwnersLabel {
-				if err := ghc.AddLabel(org, repo, number, labels.InvalidOwners); err != nil {
-					return err
-				}
-			}
-			return ghc.CreateComment(org, repo, number, err.Error())
-		}
-	}
-
 	// Resolve teams even when trusted-user checks are disabled. A team is not a
 	// username, and inaccessible or cross-organization teams must not be ignored.
 	teams := repoowners.NewTeamResolver(org, ghc)
@@ -341,7 +328,7 @@ func handle(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *l
 
 	for _, c := range modifiedOwnersFiles {
 		path := filepath.Join(r.Directory(), c.Filename)
-		msg, owners := parseOwnersFile(oc, path, c, log, bannedLabels, filenames, repoAliases)
+		msg, owners := parseOwnersFile(oc, path, c, log, bannedLabels, filenames)
 		if msg != nil {
 			wrongOwnersFiles[c.Filename] = *msg
 			continue
@@ -435,47 +422,7 @@ func handle(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *l
 	return nil
 }
 
-// validateRequiredReviewerTeams also checks unchanged OWNERS files after an
-// alias edit. Parsing errors in changed files are reported by parseOwnersFile.
-func validateRequiredReviewerTeams(oc ownersClient, dir string, aliases repoowners.RepoAliases, filenames ownersconfig.Filenames) error {
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() && info.Name() == ".git" {
-			return filepath.SkipDir
-		}
-		if !info.Mode().IsRegular() || info.Name() != filenames.Owners {
-			return nil
-		}
-		validate := func(config repoowners.Config) error {
-			if err := repoowners.ValidateRequiredReviewers(aliases.ExpandAliases(repoowners.NormLogins(config.RequiredReviewers))); err != nil {
-				rel, _ := filepath.Rel(dir, path)
-				return fmt.Errorf("%s: %w", rel, err)
-			}
-			return nil
-		}
-		simple, err := oc.ParseSimpleConfig(path)
-		if err == filepath.SkipDir {
-			return nil
-		}
-		if err == nil && !simple.Empty() {
-			return validate(simple.Config)
-		}
-		full, err := oc.ParseFullConfig(path)
-		if err != nil {
-			return nil
-		}
-		for _, config := range full.Filters {
-			if err := validate(config); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-func parseOwnersFile(oc ownersClient, path string, c github.PullRequestChange, log *logrus.Entry, bannedLabels []string, filenames ownersconfig.Filenames, aliases repoowners.RepoAliases) (*messageWithLine, []string) {
+func parseOwnersFile(oc ownersClient, path string, c github.PullRequestChange, log *logrus.Entry, bannedLabels []string, filenames ownersconfig.Filenames) (*messageWithLine, []string) {
 	var requiredReviewers []string
 	var reviewers []string
 	var approvers []string
@@ -529,9 +476,6 @@ func parseOwnersFile(oc ownersClient, path string, c github.PullRequestChange, l
 		advisoryApprovers = simple.Config.AdvisoryApprovers
 		labels = simple.Config.Labels
 	}
-	if err := repoowners.ValidateRequiredReviewers(aliases.ExpandAliases(repoowners.NormLogins(requiredReviewers))); err != nil {
-		return &messageWithLine{lineNumber, err.Error()}, nil
-	}
 	// Check labels against ban list
 	if sets.New[string](labels...).HasAny(bannedLabels...) {
 		return &messageWithLine{
@@ -548,6 +492,7 @@ func parseOwnersFile(oc ownersClient, path string, c github.PullRequestChange, l
 	}
 	owners := append(reviewers, approvers...)
 	owners = append(owners, advisoryApprovers...)
+	owners = append(owners, requiredReviewers...)
 	return nil, owners
 }
 

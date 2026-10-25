@@ -195,10 +195,10 @@ func TestTeamAdvisoryApprovers(t *testing.T) {
 	}
 }
 
-func TestTeamsNotSupportedInRequiredReviewers(t *testing.T) {
+func TestTeamsInRequiredReviewers(t *testing.T) {
 	for _, reference := range []string{"@org/team", "maintainers"} {
 		files := map[string][]byte{
-			"OWNERS":         []byte("approvers: [alice]\nrequired_reviewers: ['" + reference + "']\n"),
+			"OWNERS":         []byte("approvers: [alice]\nrequired_reviewers: [alice, '" + reference + "']\n"),
 			"OWNERS_ALIASES": []byte("aliases:\n  maintainers: ['@org/team']\n"),
 		}
 		client, cleanup, err := getTestClient(files, false, true, false, false, nil, nil, nil, nil, localgit.NewV2)
@@ -206,11 +206,28 @@ func TestTeamsNotSupportedInRequiredReviewers(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(cleanup)
-		if _, err := client.LoadRepoOwners("org", "repo", defaultBranch); err == nil || !strings.Contains(err.Error(), "required_reviewers") {
-			t.Errorf("expected required_reviewers error for %q, got %v", reference, err)
+		ghc := client.ghc.(*fakeGitHubClient)
+		ghc.teams = map[string][]github.TeamMember{"org/team": {{Login: "alice"}, {Login: "bob"}, {Login: "carol"}}}
+		owners, err := client.LoadRepoOwners("org", "repo", defaultBranch)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if ghc := client.ghc.(*fakeGitHubClient); ghc.teamCalls != 0 {
-			t.Errorf("unexpected membership lookup for unsupported field")
+		if got, want := owners.RequiredReviewers("file.go"), sets.New("alice", "bob", "carol"); !got.Equal(want) {
+			t.Errorf("required reviewers for %q: got %v, want all members %v", reference, got, want)
+		}
+		if ghc.teamCalls != 1 {
+			t.Errorf("got %d membership lookups, want 1", ghc.teamCalls)
+		}
+		ghc.teams["org/team"] = []github.TeamMember{{Login: "dave"}}
+		updated, err := client.LoadRepoOwners("org", "repo", defaultBranch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !updated.RequiredReviewers("file.go").Equal(sets.New("alice", "dave")) {
+			t.Errorf("required reviewers did not refresh: %v", updated.RequiredReviewers("file.go"))
+		}
+		if !owners.RequiredReviewers("file.go").Equal(sets.New("alice", "bob", "carol")) {
+			t.Error("refresh mutated the previous required-reviewer snapshot")
 		}
 	}
 }

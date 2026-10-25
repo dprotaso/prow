@@ -44,8 +44,8 @@ OWNERS_ALIASES file, or explicit GitHub team references.
 
 ### GitHub teams
 
-Use a quoted `"@org/team-slug"` reference in `approvers`, `reviewers`, or
-`advisory_approvers`:
+Use a quoted `"@org/team-slug"` reference in `approvers`, `reviewers`,
+`required_reviewers`, or `advisory_approvers`:
 
 ```yaml
 approvers:
@@ -77,8 +77,19 @@ this does not create a native GitHub team review request. Team members listed as
 advisory approvers retain advisory semantics and are not automatically assigned
 as approvers.
 
-Teams are not supported in `required_reviewers`, including through aliases:
-that field requires specific individuals and does not mean "one member of a team".
+Teams behave like aliases in every owner role. In `required_reviewers`, **every
+team member** is included in the required-reviewer set, so reviewer-selection
+plugins request reviews from all of them in addition to normally selected
+reviewers. This can exceed the normal reviewer-count limit, just as a static
+alias can. It does not mean "select one member of the team", and it does not
+require every member's approval before merging: `required_reviewers` controls
+review requests, not merge requirements or approval authority.
+
+```yaml
+required_reviewers:
+- "@example/security-reviewers"
+```
+
 The `verify-owners` plugin validates team references even when trusted-user checks
 are disabled. Invalid syntax, cross-organization references, and teams GitHub
 reports as not found are rejected. Other lookup failures are returned as errors,
